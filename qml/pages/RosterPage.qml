@@ -32,7 +32,7 @@ Page {
         return weekdayNames[n] || `週${n}`
     }
 
-    property int yearValue: AppState.selectedMonth.getFullYear()
+    property int yearValue: (new Date()).getFullYear()
     property int monthValue: AppState.selectedMonth.getMonth() + 1
 
     ColumnLayout {
@@ -42,7 +42,7 @@ Page {
 
         RowLayout {
             spacing: 8
-            Button { text: "戻る"; onClicked: back(); font.bold: true }
+            Button { text: "ログアウト"; onClicked: back(); font.bold: true }
             Button { text: "全員の出勤可視化"; onClicked: openAllAvailability(); font.bold: true }
             Button { text: "自動シフト生成 (β)"; onClicked: openAutoShift(); font.bold: true }
             Item { Layout.fillWidth: true }
@@ -65,30 +65,26 @@ Page {
             Layout.preferredHeight: 64
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 10
-                Label { text: "対象月" }
-                SpinBox {
-                    id: yearBox
-                    from: 2023
-                    to: 2035
-                    value: yearValue
-                    onValueChanged: {
-                        yearValue = value
-                        AppState.setMonth(yearValue, monthValue - 1)
+                anchors.margins: 10
+                spacing: 8
+                Label { text: "対象月"; Layout.alignment: Qt.AlignVCenter }
+                Label { text: yearValue + "年"; Layout.alignment: Qt.AlignVCenter }
+                RowLayout {
+                    spacing: 4
+                    Layout.alignment: Qt.AlignVCenter
+                    ComboBox {
+                        id: monthBox
+                        model: [1,2,3,4,5,6,7,8,9,10,11,12]
+                        currentIndex: monthValue - 1
+                        onActivated: function(idx) {
+                            monthValue = model[idx]
+                            AppState.setMonth(yearValue, monthValue - 1)
+                        }
+                        Layout.preferredWidth: 70
                     }
+                    Label { text: "月"; Layout.alignment: Qt.AlignVCenter }
                 }
-                ComboBox {
-                    id: monthBox
-                    model: [1,2,3,4,5,6,7,8,9,10,11,12]
-                    currentIndex: monthValue - 1
-                    onActivated: function(idx) {
-                        monthValue = model[idx]
-                        AppState.setMonth(yearValue, monthValue - 1)
-                    }
-                    width: 100
-                }
-                Label { text: "表示中: " + yearValue + "年" + monthValue + "月"; color: "#607d8b" }
+                Label { text: "表示中: " + yearValue + "年" + monthValue + "月"; color: "#607d8b"; Layout.alignment: Qt.AlignVCenter }
             }
         }
 
@@ -116,6 +112,7 @@ Page {
                     Layout.preferredWidth: 160
                     onAccepted: addButton.clicked()
                 }
+                Label { text: "役職"; width: 32; horizontalAlignment: Text.AlignRight }
                 ComboBox {
                     id: newRole
                     model: ["社員", "パート", "アルバイト"]
@@ -125,8 +122,7 @@ Page {
                     id: addButton
                     text: "追加"
                     onClicked: {
-                        const fullName = `${newLast.text.trim()} ${newFirst.text.trim()}`.trim()
-                        AppState.addStaff(fullName, newRole.currentText)
+                        AppState.addStaff(newLast.text, newFirst.text, newRole.currentText)
                         newLast.text = ""
                         newFirst.text = ""
                         newRole.currentIndex = 0
@@ -161,7 +157,7 @@ Page {
                     }
                     ColumnLayout {
                         Layout.fillWidth: true
-                        Label { text: modelData.name; font.pixelSize: 18; font.bold: true; color: roleColor }
+                        Label { text: AppState.fullName(modelData); font.pixelSize: 18; font.bold: true; color: roleColor }
                         Label { text: "役割: " + modelData.role; color: "#607d8b" }
                         Label {
                             text: "固定: " + (modelData.fixed.length > 0 ? modelData.fixed.map(f => `${weekdayLabel(f.weekday)} ${f.start}-${f.end}`).join(", ") : "なし")

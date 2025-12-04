@@ -16,6 +16,8 @@ QtObject {
     property var staffEntries: [
         {
             id: 1,
+            lastName: "佐藤",
+            firstName: "梓",
             name: "佐藤 梓",
             role: "店長",
             status: "partial",
@@ -24,6 +26,8 @@ QtObject {
         },
         {
             id: 2,
+            lastName: "中村",
+            firstName: "蒼",
             name: "中村 蒼",
             role: "大学生",
             status: "notset",
@@ -32,6 +36,8 @@ QtObject {
         },
         {
             id: 3,
+            lastName: "高橋",
+            firstName: "真希",
             name: "高橋 真希",
             role: "パート",
             status: "complete",
@@ -48,6 +54,48 @@ QtObject {
 
     property var autoShiftDraft: ({})
 
+    function combineName(lastName, firstName) {
+        const ln = (lastName || "").trim()
+        const fn = (firstName || "").trim()
+        if (ln && fn)
+            return ln + " " + fn
+        return ln || fn
+    }
+
+    function splitFullName(fullName) {
+        const raw = (fullName || "").trim()
+        if (raw === "")
+            return { lastName: "", firstName: "" }
+        const parts = raw.split(/[\s　]+/)
+        if (parts.length === 1)
+            return { lastName: parts[0], firstName: "" }
+        const last = parts.shift()
+        return { lastName: last, firstName: parts.join(" ") }
+    }
+
+    function normalizeNameParts(lastName, firstName, fallbackFullName) {
+        const ln = (lastName || "").trim()
+        const fn = (firstName || "").trim()
+        if (ln || fn)
+            return { lastName: ln, firstName: fn }
+        return splitFullName(fallbackFullName)
+    }
+
+    function fullName(staff) {
+        if (!staff)
+            return ""
+        return combineName(staff.lastName, staff.firstName)
+    }
+
+    function lastNameOnly(staff) {
+        if (!staff)
+            return ""
+        const ln = (staff.lastName || "").trim()
+        if (ln !== "")
+            return ln
+        return splitFullName(fullName(staff)).lastName
+    }
+
     function db() {
         return Sql.LocalStorage.openDatabaseSync("ShiftTemplateApp", "1.0", "Shift template local store", 2 * 1024 * 1024);
     }
@@ -56,11 +104,45 @@ QtObject {
         const database = db()
         database.transaction(function(tx) {
             tx.executeSql("CREATE TABLE IF NOT EXISTS accounts (email TEXT PRIMARY KEY, password TEXT)");
-            tx.executeSql("CREATE TABLE IF NOT EXISTS staff (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, name TEXT, role TEXT)");
+            tx.executeSql("CREATE TABLE IF NOT EXISTS staff (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, name TEXT, last_name TEXT, first_name TEXT, role TEXT)");
             tx.executeSql("CREATE TABLE IF NOT EXISTS fixed_shift (id INTEGER PRIMARY KEY AUTOINCREMENT, staff_id INTEGER, weekday INTEGER, start TEXT, end TEXT)");
             tx.executeSql("CREATE TABLE IF NOT EXISTS availability (id INTEGER PRIMARY KEY AUTOINCREMENT, staff_id INTEGER, date TEXT, type TEXT, start TEXT, end TEXT)");
+            ensureStaffNameColumns(tx)
+            migrateStaffNames(tx)
         })
         dbReady = true
+    }
+
+    function ensureStaffNameColumns(tx) {
+        const rs = tx.executeSql("PRAGMA table_info(staff)")
+        let hasLast = false
+        let hasFirst = false
+        for (let i = 0; i < rs.rows.length; i++) {
+            const colName = rs.rows.item(i).name
+            if (colName === "last_name")
+                hasLast = true
+            if (colName === "first_name")
+                hasFirst = true
+        }
+        if (!hasLast)
+            tx.executeSql("ALTER TABLE staff ADD COLUMN last_name TEXT")
+        if (!hasFirst)
+            tx.executeSql("ALTER TABLE staff ADD COLUMN first_name TEXT")
+    }
+
+    function migrateStaffNames(tx) {
+        const rs = tx.executeSql("SELECT id, name, last_name, first_name FROM staff")
+        for (let i = 0; i < rs.rows.length; i++) {
+            const row = rs.rows.item(i)
+            const normalized = normalizeNameParts(row.last_name, row.first_name, row.name)
+            const combined = combineName(normalized.lastName, normalized.firstName)
+            const currentLast = (row.last_name || "").trim()
+            const currentFirst = (row.first_name || "").trim()
+            if (normalized.lastName !== currentLast || normalized.firstName !== currentFirst || row.name !== combined) {
+                tx.executeSql("UPDATE staff SET last_name = ?, first_name = ?, name = ? WHERE id = ?",
+                              [normalized.lastName, normalized.firstName, combined, row.id])
+            }
+        }
     }
 
     function initialMaxId() {
@@ -69,8 +151,29 @@ QtObject {
         return max + 1
     }
 
+    function computeNextStaffId() {
+        // start from in-memory guess
+        let candidate = initialMaxId()
+        // adjust by DB max if available
+        if (dbReady) {
+            const database = db()
+            database.readTransaction(function(tx) {
+                const rs = tx.executeSql("SELECT MAX(id) AS maxId FROM staff")
+                if (rs.rows.length === 1 && rs.rows.item(0).maxId !== null) {
+                    const dbMax = rs.rows.item(0).maxId
+                    if (dbMax + 1 > candidate)
+                        candidate = dbMax + 1
+                }
+            })
+        }
+        // never go backwards
+        if (candidate < nextStaffId)
+            candidate = nextStaffId
+        return candidate
+    }
+
     function newStaffId() {
-        nextStaffId = nextStaffId + 1
+        nextStaffId = computeNextStaffId()
         return nextStaffId
     }
 
@@ -83,15 +186,19 @@ QtObject {
         const database = db()
         const rows = []
         database.readTransaction(function(tx) {
-            const rs = tx.executeSql("SELECT id, name, role FROM staff WHERE account = ?", [accountKey])
+            const rs = tx.executeSql("SELECT id, name, last_name, first_name, role FROM staff WHERE account = ?", [accountKey])
             for (let i = 0; i < rs.rows.length; i++) {
                 rows.push(rs.rows.item(i))
             }
         })
         const loaded = rows.map(function(r) {
+            const names = normalizeNameParts(r.last_name, r.first_name, r.name)
+            const displayName = combineName(names.lastName, names.firstName)
             return {
                 id: r.id,
-                name: r.name,
+                lastName: names.lastName,
+                firstName: names.firstName,
+                name: displayName,
                 role: r.role || "スタッフ",
                 status: "notset",
                 fixed: [],
@@ -112,7 +219,7 @@ QtObject {
         })
         // 取得件数が 0 でも初期データをクリアして空の名簿にする
         staffEntries = refreshStatuses(loaded)
-        nextStaffId = initialMaxId()
+        nextStaffId = computeNextStaffId()
         // 現在の月の出勤可否をロードして固定シフトを反映
         loadAvailabilityForMonth(selectedMonth.getFullYear(), selectedMonth.getMonth())
         applyFixedToSelectedMonth()
@@ -138,8 +245,27 @@ QtObject {
     }
 
     function refreshStatuses(entries) {
-        return entries.map(function(s) {
+        const withStatus = entries.map(function(s) {
             return Object.assign({}, s, { status: statusFromAvailability(s) })
+        })
+        return sortStaffEntries(withStatus)
+    }
+
+    function rolePriority(role) {
+        if (role === "社員") return 0
+        if (role === "パート") return 1
+        if (role === "アルバイト") return 2
+        return 3
+    }
+
+    function sortStaffEntries(entries) {
+        return entries.slice().sort(function(a, b) {
+            const pa = rolePriority(a.role)
+            const pb = rolePriority(b.role)
+            if (pa !== pb)
+                return pa - pb
+            // fallback: ID asc for stability
+            return a.id - b.id
         })
     }
 
@@ -201,26 +327,40 @@ QtObject {
         return true
     }
 
+    function logout() {
+        isAuthenticated = false
+        userEmail = ""
+        accountKey = "local"
+        staffEntries = []
+        autoShiftDraft = {}
+    }
+
     function setMonth(year, monthIndex) {
         selectedMonth = new Date(year, monthIndex, 1)
         loadAvailabilityForMonth(year, monthIndex)
         applyFixedToSelectedMonth()
     }
 
-    function addStaff(name, roleText) {
-        if (!name || name.trim() === "")
+    function addStaff(lastName, firstName, roleText) {
+        const ln = (lastName || "").trim()
+        const fn = (firstName || "").trim()
+        if (ln === "" && fn === "")
             return
         if (!dbReady) initDb()
         const roleVal = (roleText && roleText.trim() !== "") ? roleText.trim() : "スタッフ"
+        const displayName = combineName(ln, fn)
         let newId = newStaffId()
         const database = db()
         database.transaction(function(tx) {
-            tx.executeSql("INSERT INTO staff (id, account, name, role) VALUES (?, ?, ?, ?)", [newId, accountKey, name.trim(), roleVal])
+            tx.executeSql("INSERT INTO staff (id, account, name, last_name, first_name, role) VALUES (?, ?, ?, ?, ?, ?)",
+                          [newId, accountKey, displayName, ln, fn, roleVal])
         })
         const clone = staffEntries.slice()
         clone.push({
             id: newId,
-            name: name.trim(),
+            lastName: ln,
+            firstName: fn,
+            name: displayName,
             role: roleVal,
             status: "notset",
             fixed: [],
@@ -240,7 +380,7 @@ QtObject {
         })
         // メモリから削除
         staffEntries = staffEntries.filter(function(s) { return s.id !== staffId })
-        nextStaffId = initialMaxId()
+        nextStaffId = computeNextStaffId()
     }
 
     function setFixedShift(staffId, weekday, start, end) {
@@ -336,11 +476,11 @@ QtObject {
     }
 
     function updateRole(staffId, newRole) {
-        staffEntries = staffEntries.map(function(s) {
+        staffEntries = refreshStatuses(staffEntries.map(function(s) {
             if (s.id === staffId)
                 return Object.assign({}, s, { role: newRole })
             return s
-        })
+        }))
     }
 
     function setAvailability(staffId, isoDate, payload) {
@@ -409,7 +549,7 @@ QtObject {
             const ranked = people.slice().sort((a, b) => load[a.staff.id] - load[b.staff.id])
             const assigned = ranked.slice(0, requiredPerDay).map(entry => {
                 load[entry.staff.id] += 1
-                return { name: entry.staff.name, window: entry.slot }
+                return { name: fullName(entry.staff), window: entry.slot }
             })
             draft[iso] = {
                 assigned: assigned,

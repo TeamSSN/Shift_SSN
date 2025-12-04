@@ -77,7 +77,6 @@ ApplicationWindow {
         id: loginPage
         LoginPage {
             onLoginSucceeded: function(email) {
-                AppState.login(email)
                 stack.push(rosterPage)
             }
         }
@@ -97,7 +96,10 @@ ApplicationWindow {
             onOpenStaff: function(staffId) { stack.push(staffDetailPage, { staffId: staffId }) }
             onOpenAllAvailability: function() { stack.push(allAvailabilityPage) }
             onOpenAutoShift: function() { stack.push(autoShiftPage) }
-            onBack: function() { stack.pop() }
+            onBack: function() {
+                AppState.logout()
+                stack.pop()
+            }
         }
     }
 

@@ -12,7 +12,7 @@ Page {
 
     title: "個人設定"
 
-    property var staff: ({ name: "不明", role: "スタッフ", fixed: [], availability: {} })
+    property var staff: ({ lastName: "不明", firstName: "", name: "不明", role: "スタッフ", fixed: [], availability: {} })
     property string lastEditedIso: ""
     property string editingIso: ""
     property int daysInMonth: Cal.daysInMonth(AppState.selectedMonth.getFullYear(), AppState.selectedMonth.getMonth())
@@ -20,6 +20,8 @@ Page {
     property int fixedWeekday: 1
     property string fixedStart: "10:00"
     property string fixedEnd: "18:00"
+    property var hourOptions: [7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]
+    property var minuteOptions: [0,15,30,45]
     property var weekdayNames: ["", "月", "火", "水", "木", "金", "土", "日"]
     property var roleOptions: ["社員", "パート", "アルバイト"]
     property var roleModel: roleOptions
@@ -32,7 +34,7 @@ Page {
         if (found)
             staff = found
         else
-            staff = { name: "不明", role: "スタッフ", fixed: [], availability: {} }
+            staff = { lastName: "不明", firstName: "", name: "不明", role: "スタッフ", fixed: [], availability: {} }
         if (staff.fixed.length > 0) {
             fixedWeekday = staff.fixed[0].weekday
             fixedStart = staff.fixed[0].start
@@ -45,6 +47,24 @@ Page {
         if (roleBox)
             roleBox.currentIndex = Math.max(0, roleModel.indexOf(staff.role || roleOptions[0]))
     }
+
+    function parseTime(str) {
+        const m = /^\\s*(\\d{1,2}):(\\d{2})\\s*$/.exec(str || "")
+        if (!m)
+            return { hour: 10, minute: 0 }
+        return { hour: parseInt(m[1]), minute: parseInt(m[2]) }
+    }
+
+    function formatTime(hour, minute) {
+        const h = Math.max(0, Math.min(23, parseInt(hour)))
+        const m = Math.max(0, Math.min(59, parseInt(minute)))
+        return h.toString().padStart(2, "0") + ":" + m.toString().padStart(2, "0")
+    }
+
+    function fixedStartHour() { return parseTime(fixedStart).hour }
+    function fixedStartMinute() { return parseTime(fixedStart).minute }
+    function fixedEndHour() { return parseTime(fixedEnd).hour }
+    function fixedEndMinute() { return parseTime(fixedEnd).minute }
 
     Component.onCompleted: refreshStaff()
     onStaffIdChanged: refreshStaff()
@@ -141,7 +161,7 @@ Page {
             RowLayout {
                 spacing: 8
                 Button { text: "戻る"; onClicked: done(); font.bold: true }
-                Label { text: staff.name; font.pixelSize: 22; font.bold: true }
+                Label { text: AppState.fullName(staff); font.pixelSize: 22; font.bold: true }
                 Label { text: staff.role; color: "#666" }
             }
 
@@ -196,11 +216,11 @@ Page {
                             RowLayout {
                                 spacing: 6
                                 Label { text: "曜日" }
-                                ComboBox {
-                                    id: weekdayBox
-                                    model: [
-                                        { label: "月", value: 1 },
-                                        { label: "火", value: 2 },
+                            ComboBox {
+                                id: weekdayBox
+                                model: [
+                                    { label: "月", value: 1 },
+                                    { label: "火", value: 2 },
                                         { label: "水", value: 3 },
                                         { label: "木", value: 4 },
                                         { label: "金", value: 5 },
@@ -214,18 +234,44 @@ Page {
                                     width: 80
                                 }
                                 Label { text: "開始" }
-                                TextField {
-                                    text: fixedStart
-                                    onTextChanged: fixedStart = text
-                                    width: 80
-                                    placeholderText: "hh:mm"
+                                ComboBox {
+                                    id: startHourBox
+                                    model: hourOptions
+                                    width: 70
+                                    currentIndex: Math.max(0, hourOptions.indexOf(fixedStartHour()))
+                                    onActivated: function(idx) {
+                                        fixedStart = formatTime(model[idx], fixedStartMinute())
+                                    }
+                                }
+                                Label { text: ":" }
+                                ComboBox {
+                                    id: startMinuteBox
+                                    model: minuteOptions
+                                    width: 70
+                                    currentIndex: Math.max(0, minuteOptions.indexOf(fixedStartMinute()))
+                                    onActivated: function(idx) {
+                                        fixedStart = formatTime(fixedStartHour(), model[idx])
+                                    }
                                 }
                                 Label { text: "終了" }
-                                TextField {
-                                    text: fixedEnd
-                                    onTextChanged: fixedEnd = text
-                                    width: 80
-                                    placeholderText: "hh:mm"
+                                ComboBox {
+                                    id: endHourBox
+                                    model: hourOptions
+                                    width: 70
+                                    currentIndex: Math.max(0, hourOptions.indexOf(fixedEndHour()))
+                                    onActivated: function(idx) {
+                                        fixedEnd = formatTime(model[idx], fixedEndMinute())
+                                    }
+                                }
+                                Label { text: ":" }
+                                ComboBox {
+                                    id: endMinuteBox
+                                    model: minuteOptions
+                                    width: 70
+                                    currentIndex: Math.max(0, minuteOptions.indexOf(fixedEndMinute()))
+                                    onActivated: function(idx) {
+                                        fixedEnd = formatTime(fixedEndHour(), model[idx])
+                                    }
                                 }
                                 Button {
                                     text: "追加/上書き"
